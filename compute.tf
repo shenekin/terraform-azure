@@ -20,7 +20,7 @@ resource "azurerm_network_interface" "master_nic" {
 }
 
 resource "azurerm_network_interface" "worker_nic" {
-  count               = 5
+  count               = 3
   name                = "worker-nic-${count.index}"
   location            = azurerm_resource_group.rg.location
   resource_group_name = azurerm_resource_group.rg.name
@@ -38,13 +38,13 @@ resource "azurerm_network_interface_security_group_association" "master_assoc" {
 }
 
 resource "azurerm_network_interface_security_group_association" "worker_assoc" {
-  count                     = 5
+  count                     = 3
   network_interface_id      = azurerm_network_interface.worker_nic[count.index].id
   network_security_group_id = azurerm_network_security_group.nsg.id
 }
 
 resource "azurerm_linux_virtual_machine" "master" {
-  name                = "k8s-master-01"
+  name                = "k8s-master"
   resource_group_name = azurerm_resource_group.rg.name
   location            = azurerm_resource_group.rg.location
   size                = "Standard_D2s_v3"
