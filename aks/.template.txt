@@ -1,0 +1,10 @@
+Outputs:
+
+cluster_fqdn = "aksdev-0nzh0vsw.hcp.eastasia.azmk8s.io"
+cluster_id = "/subscriptions/d40d8beb-1741-4b53-9011-2487884a6a32/resourceGroups/rg-aks-dev/providers/Microsoft.ContainerService/managedClusters/aks-dev"
+cluster_name = "aks-dev"
+identity_principal_id = "53c48046-4ded-4939-893c-017a2b2eceda"
+kube_config = <sensitive>
+kube_config_command = "az aks get-credentials --resource-group rg-aks-dev --name aks-dev"
+node_resource_group = "MC_rg-aks-dev_aks-dev_eastasia"
+resource_group_name = "rg-aks-dev"
