@@ -1,0 +1,294 @@
+
+# 1. Architecture
+
+Pipeline flow:
+
+```
+GitHub
+   │
+   ▼
+Jenkins Pipeline
+   │
+   ├── Build Docker Image
+   ├── Push to ACR
+   ├── Deploy to GREEN environment
+   ├── Run health check
+   └── Switch Service (BLUE → GREEN)
+           │
+                  ▼
+        Kubernetes
+```
+
+In Kubernetes you will have:
+
+```
+auth-service-blue     (old version)
+auth-service-green    (new version)
+
+Service → points to either blue or green
+```
+
+Example:
+
+```
+auth-service
+   │
+   ├── selector: version=blue
+   └── selector: version=green
+```
+
+Switching traffic = **change service selector**.
+
+---
+
+# 2. Create Blue Deployment
+
+`auth-blue.yaml`
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-blue
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: auth-service
+      version: blue
+  template:
+    metadata:
+      labels:
+        app: auth-service
+        version: blue
+    spec:
+      containers:
+      - name: auth-service
+        image: ekinregistry.azurecr.io/auth-service:v1
+        ports:
+        - containerPort: 8000
+```
+
+Deploy it:
+
+```bash
+kubectl apply -f auth-blue.yaml
+```
+
+---
+
+# 3. Create Green Deployment
+
+`auth-green.yaml`
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-green
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: auth-service
+      version: green
+  template:
+    metadata:
+      labels:
+        app: auth-service
+        version: green
+    spec:
+      containers:
+      - name: auth-service
+        image: ekinregistry.azurecr.io/auth-service:v2
+        ports:
+        - containerPort: 8000
+```
+
+---
+
+# 4. Create Kubernetes Service
+
+The **service decides which environment receives traffic**.
+
+`auth-service.yaml`
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-service
+spec:
+  selector:
+    app: auth-service
+    version: blue
+  ports:
+  - port: 80
+    targetPort: 8000
+  type: ClusterIP
+```
+
+Initially traffic goes to **blue**.
+
+Deploy:
+
+```bash
+kubectl apply -f auth-service.yaml
+```
+
+---
+
+# 5. Jenkins Pipeline
+
+Your Jenkins pipeline will:
+
+1. Build image
+2. Push to ACR
+3. Deploy GREEN
+4. Test GREEN
+5. Switch traffic
+
+Example **Jenkinsfile**
+
+```groovy
+pipeline {
+    agent any
+
+    environment {
+        ACR = "ekinregistry.azurecr.io"
+        IMAGE = "auth-service"
+        TAG = "${BUILD_NUMBER}"
+    }
+
+    stages {
+
+        stage('Build Image') {
+            steps {
+                sh "docker build -t $ACR/$IMAGE:$TAG ."
+            }
+        }
+
+        stage('Push Image') {
+            steps {
+                sh "docker push $ACR/$IMAGE:$TAG"
+            }
+        }
+
+        stage('Deploy Green') {
+            steps {
+                sh """
+                kubectl set image deployment/auth-green \
+                auth-service=$ACR/$IMAGE:$TAG
+                """
+            }
+        }
+
+        stage('Health Check') {
+            steps {
+                sh "sleep 20"
+                sh "kubectl get pods"
+            }
+        }
+
+        stage('Switch Traffic') {
+            steps {
+                sh """
+                kubectl patch service auth-service \
+                -p '{"spec":{"selector":{"app":"auth-service","version":"green"}}}'
+                """
+            }
+        }
+    }
+}
+```
+
+---
+
+# 6. Traffic Switch
+
+When Jenkins runs:
+
+```
+Service → Blue
+```
+
+After switch:
+
+```
+Service → Green
+```
+
+Command used:
+
+```bash
+kubectl patch service auth-service \
+-p '{"spec":{"selector":{"app":"auth-service","version":"green"}}}'
+```
+
+---
+
+# 7. Rollback
+
+If GREEN fails:
+
+```bash
+kubectl patch service auth-service \
+-p '{"spec":{"selector":{"app":"auth-service","version":"blue"}}}'
+```
+
+Rollback is **instant** because both environments exist.
+
+---
+
+# 8. Production Architecture
+
+Typical AKS setup:
+
+```
+                 Azure Load Balancer
+                        │
+                        ▼
+                  Kubernetes Service
+                        │
+          ┌─────────────┴─────────────┐
+          ▼                           ▼
+    auth-blue pods              auth-green pods
+     version=v1                   version=v2
+```
+
+
+# 9. Best Practice
+
+Usually combine with:
+
+* Jenkins
+* Kubernetes
+* Azure Container Registry
+* Ingress Controller
+* Health checks
+
+Blue/Green uses:
+
+* **NGINX Ingress**
+* **Argo Rollouts**
+* **Istio**
+
+
+# 10. What Your Final CI/CD Looks Like
+
+```
+GitHub Push
+     │
+        ▼
+ Jenkins Pipeline
+     │
+     ├── Build Docker
+     ├── Push ACR
+     ├── Deploy Green
+     ├── Test Green
+     └── Switch Service
+             │
+                    ▼
+           AKS
+
+
